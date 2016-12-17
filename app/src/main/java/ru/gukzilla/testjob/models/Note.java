@@ -7,9 +7,9 @@ package ru.gukzilla.testjob.models;
 public class Note {
 
     String _id;
-    String prev = "";
-    String next = "";
-    String name = "";
+    String prev = null;
+    String next = null;
+    String name = null;
 
     public Note(String _id) {
         this._id = _id;

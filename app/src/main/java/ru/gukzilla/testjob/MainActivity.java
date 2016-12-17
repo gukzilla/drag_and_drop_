@@ -1,19 +1,21 @@
 package ru.gukzilla.testjob;
 
+import android.app.ProgressDialog;
+import android.os.Handler;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.TextView;
 
 import com.h6ah4i.android.widget.advrecyclerview.draggable.DraggableItemAdapter;
 import com.h6ah4i.android.widget.advrecyclerview.draggable.ItemDraggableRange;
 import com.h6ah4i.android.widget.advrecyclerview.draggable.RecyclerViewDragDropManager;
-import com.h6ah4i.android.widget.advrecyclerview.utils.AbstractDraggableItemViewHolder;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import ru.gukzilla.testjob.models.Note;
@@ -21,7 +23,13 @@ import ru.gukzilla.testjob.models.Note;
 public class MainActivity extends AppCompatActivity {
 
     private DataBase dataBase;
-    private int count = 0;
+    private final String GEN_TAG = "GENERATION";
+    private final String TAG = getClass().getSimpleName();
+    private final int numberOfGeneration = 1000;
+
+    interface GenerationCallback {
+        void onComplete();
+    }
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -31,44 +39,146 @@ public class MainActivity extends AppCompatActivity {
         dataBase = new DataBase(this);
         dataBase.open();
 
+        new Handler().postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                loadData();
+            }
+        }, 300);
+    }
+
+    private void loadData() {
         if(dataBase.isCreated()) {
-            Note firstNote = new Note(dataBase.generateId());
-            count = 1;
-            notesGeneration(firstNote, new NoteCallback() {
+            generationAsync(new GenerationCallback() {
                 @Override
-                public boolean onComplete(Note note) {
-                    note.setName(Integer.toString(count));
-                    dataBase.addNote(note);
-                    return ++count <= 100;
+                public void onComplete() {
+                    recreateRecyclerView();
                 }
             });
-        }
-
-        RecyclerView recyclerView = (RecyclerView) findViewById(R.id.recycler_view);
-        // Setup D&D feature and RecyclerView
-        RecyclerViewDragDropManager dragMgr = new RecyclerViewDragDropManager();
-        dragMgr.setInitiateOnMove(false);
-        dragMgr.setInitiateOnLongPress(true);
-        recyclerView.setLayoutManager(new LinearLayoutManager(this));
-        recyclerView.setAdapter(dragMgr.createWrappedAdapter(new MyAdapter()));
-        dragMgr.attachRecyclerView(recyclerView);
-    }
-
-    private interface NoteCallback {
-        boolean onComplete(Note note);
-    }
-
-    private void notesGeneration(Note note, NoteCallback noteCallback) {
-        Note next = new Note(dataBase.generateId());
-
-        note.setNext(next.get_id());
-        next.setPrev(note.get_id());
-
-        if(noteCallback.onComplete(note)) {
-            notesGeneration(next, noteCallback);
+        } else {
+            recreateRecyclerView();
         }
     }
 
+    private void recreateRecyclerView() {
+        final View progressBar = findViewById(R.id.progressBar);
+        progressBar.setVisibility(View.VISIBLE);
+
+        dataBase.getAllNotesAsync(new DataBase.NotesListener() {
+            @Override
+            public void onResult(List<Note> notes) {
+                RecyclerView recyclerView = (RecyclerView) findViewById(R.id.recycler_view);
+                // Setup D&D feature and RecyclerView
+                RecyclerViewDragDropManager dragMgr = new RecyclerViewDragDropManager();
+                dragMgr.setInitiateOnMove(false);
+                dragMgr.setInitiateOnLongPress(true);
+                recyclerView.setLayoutManager(new LinearLayoutManager(MainActivity.this));
+                recyclerView.setAdapter(dragMgr.createWrappedAdapter(new RecyclerAdapter(notes)));
+                dragMgr.attachRecyclerView(recyclerView);
+
+                progressBar.setVisibility(View.GONE);
+            }
+        });
+    }
+
+    private void generationSync(DataBase.ProgressListener generationCallback, DataBase.ProgressListener insertCallback) {
+        long time = System.currentTimeMillis();
+        Log.i(GEN_TAG, "start time = " + time);
+
+        List<Note> notes = new ArrayList<>();
+        generationCallback.preStart(numberOfGeneration);
+
+        Note left = null;
+        for(int count = 1; count <= numberOfGeneration; count ++) {
+            Note right = new Note(dataBase.generateId());
+            right.setName(Integer.toString(count));
+            relinkNotes(left, right);
+            notes.add(right);
+
+            left = right;
+
+            generationCallback.onResult(count);
+        }
+        generationCallback.onComplete();
+
+        Log.i(GEN_TAG, "time of generation = " + (System.currentTimeMillis() - time));
+
+        time = System.currentTimeMillis();
+        dataBase.addNotes(notes, insertCallback);
+        Log.i(GEN_TAG, "time of addition = " + (System.currentTimeMillis() - time));
+    }
+
+    private void generationAsync(final GenerationCallback generationCallback) {
+        final ProgressDialog pd = new ProgressDialog(this);
+        pd.setMessage("Object generation...");
+        pd.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);
+        pd.setIndeterminate(true);
+        pd.setCancelable(false);
+        pd.show();
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                generationSync(new DataBase.ProgressListener() {
+                    @Override
+                    public void preStart(int size) {
+                        pd.setIndeterminate(false);
+                        pd.setMax(size);
+                    }
+
+                    @Override
+                    public void onResult(int progress) {
+                        pd.setProgress(progress);
+                    }
+
+                    @Override
+                    public void onComplete() {
+
+                    }
+                }, new DataBase.ProgressListener() {
+                    @Override
+                    public void preStart(int size) {
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                pd.setMessage("Creating objects in the database...");
+                            }
+                        });
+                        pd.setMax(size);
+                    }
+
+                    @Override
+                    public void onResult(int progress) {
+                        pd.setProgress(progress);
+                    }
+
+                    @Override
+                    public void onComplete() {
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                pd.dismiss();
+                                generationCallback.onComplete();
+                            }
+                        });
+                    }
+                });
+            }
+        }).start();
+    }
+
+    private void relinkNotes(Note left, Note right) {
+        String leftId = left != null ? left.get_id() : null;
+        String rightId = right != null ? right.get_id() : null;
+
+        if(left != null) {
+            left.setNext(rightId);
+        }
+
+        if(right != null) {
+            right.setPrev(leftId);
+        }
+    }
 
     @Override
     public void onDestroy() {
@@ -77,23 +187,12 @@ public class MainActivity extends AppCompatActivity {
     }
 
 
-
-    private static class MyViewHolder extends AbstractDraggableItemViewHolder {
-        TextView textView;
-
-        public MyViewHolder(View itemView) {
-            super(itemView);
-            textView = (TextView) itemView.findViewById(android.R.id.text1);
-        }
-    }
-
-    private class MyAdapter extends RecyclerView.Adapter<MyViewHolder> implements DraggableItemAdapter<MyViewHolder> {
+    private class RecyclerAdapter extends RecyclerView.Adapter<MyViewHolder> implements DraggableItemAdapter<MyViewHolder> {
         List<Note> mItems;
 
-        public MyAdapter() {
+        public RecyclerAdapter(List<Note> mItems) {
             setHasStableIds(true); // this is required for D&D feature.
-
-            mItems = dataBase.getAllNotes();
+            this.mItems = mItems;
         }
 
         @Override
@@ -121,54 +220,28 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void onMoveItem(int fromPosition, int toPosition) {
 
-            {
-                Note prev = getLeftOfPosition(fromPosition);
-                Note next = getRightIdOfPosition(fromPosition);
-                relinkNotes(prev, next);
-                dataBase.updateNotes(prev, next);
-            }
+            Note prev1 = getNote(fromPosition - 1);
+            Note next1 = getNote(fromPosition + 1);
+            relinkNotes(prev1, next1);
+            dataBase.updateNotes(prev1, next1);
 
-            {
-                Note fromNote = mItems.get(fromPosition);
-                Note prev = getLeftOfPosition(toPosition);
-                Note next = getRightIdOfPosition(toPosition);
+            Note fromNote = mItems.remove(fromPosition);
+            Note prev2 = getNote(toPosition - 1);
+            Note next2 = getNote(toPosition);
+            relinkNotes(prev2, fromNote);
+            relinkNotes(fromNote, next2);
+            dataBase.updateNotes(prev2, fromNote, next2);
 
-                relinkNotes(prev, fromNote);
-                relinkNotes(fromNote, next);
-
-                dataBase.updateNotes(prev, fromNote, next);
-            }
-
-            mItems.add(toPosition, mItems.remove(fromPosition));
+            mItems.add(toPosition, fromNote);
             notifyItemMoved(fromPosition, toPosition);
         }
 
-        private Note getLeftOfPosition(int position) {
-            position -= 1; // left
-            if(position < 0) {
+        private Note getNote(int position) {
+            if(position < 0 || position > mItems.size() - 1) {
                 return null;
             }
+
             return mItems.get(position);
-        }
-
-        private Note getRightIdOfPosition(int position) {
-            if(position > mItems.size() - 1) {
-                return null;
-            }
-            return mItems.get(position);
-        }
-
-        private void relinkNotes(Note left, Note right) {
-            String leftId = left != null ? left.get_id() : "";
-            String rightId = right != null ? right.get_id() : "";
-
-            if(left != null) {
-                left.setNext(rightId);
-            }
-
-            if(right != null) {
-                right.setPrev(leftId);
-            }
         }
 
         @Override
