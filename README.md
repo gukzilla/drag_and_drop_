@@ -16,3 +16,5 @@
 [https://developer.android.com/guide/topics/providers/content-provider-creating.html?hl=ru#BeforeYouStart](https://developer.android.com/guide/topics/providers/content-provider-creating.html?hl=ru#BeforeYouStart)
 
 Поэтому не совсем понятно зачем для CRUDа в нашем случае использовать ContentProvider
+
+![1](https://cloud.githubusercontent.com/assets/5888292/21286497/b39b8f86-c466-11e6-8651-72fb2db46795.png)
