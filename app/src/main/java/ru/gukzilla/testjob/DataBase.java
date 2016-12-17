@@ -113,7 +113,6 @@ public class DataBase {
         if(note == null) {
             return notes;
         }
-
         notes.add(note);
 
         HashMap<String, Note> hashMap = new HashMap<>();
@@ -184,6 +183,15 @@ public class DataBase {
         mDB.update(DB_TABLE, cv, COLUMN_ID + "=?", new String[]{note.get_id()});
 
         Log.i(TAG, "" + note.getPrev() + " -> " + note.getName() + "(" + note.get_id() + ")" + " -> " + note.getNext());
+    }
+
+    public void updateNotesAsync(final Note... notes) {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                updateNotes(notes);
+            }
+        }).start();
     }
 
     public void updateNotes(Note... notes) {
